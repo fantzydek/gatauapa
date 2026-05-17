@@ -3,394 +3,263 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cyber Hand Tracker</title>
+    <title>Soundboard Kamera Tangan</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <style>
-        :root {
-            --neon-blue: #00f3ff;
-            --neon-pink: #ff00ea;
-            --neon-green: #39ff14;
-            --neon-orange: #ff6600;
-        }
-
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            overflow: hidden;
-            background-color: #000;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: white;
-        }
-
-        .video-container {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
-        }
-
+        body { background-color: #111; color: white; font-family: sans-serif; overflow: hidden; }
+        .container { position: relative; width: 100vw; height: 100vh; }
         #videoElement {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            object-fit: cover;
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%; object-fit: cover;
             transform: scaleX(-1);
-            filter: brightness(0.6) contrast(1.2); /* Sedikit gelapin video biar efek partikel menonjol */
+            opacity: 0.8; /* Sedikit gelap biar teks jelas */
         }
-
-        #canvasElement {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            transform: scaleX(-1);
-            z-index: 10;
-        }
-
-        /* HUD / UI Overlays */
+        
         .hud {
-            position: absolute;
-            z-index: 20;
-            pointer-events: none;
+            position: absolute; z-index: 20;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px 30px;
         }
 
-        /* Status Kiri Atas */
         .status-box {
             top: 30px; left: 30px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid var(--neon-blue);
-            border-radius: 12px;
-            padding: 15px 25px;
-            backdrop-filter: blur(8px);
-            box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
         }
 
-        .status-title {
-            font-size: 14px;
-            letter-spacing: 2px;
-            color: var(--neon-blue);
-            margin-bottom: 5px;
-            text-transform: uppercase;
-        }
-
-        .status-state {
-            font-size: 28px;
+        .gesture-text {
+            font-size: 32px;
             font-weight: bold;
             text-shadow: 0 0 10px currentColor;
-            transition: color 0.3s, text-shadow 0.3s;
+            transition: color 0.2s;
         }
 
-        /* Energy Bar Kanan Atas */
-        .energy-box {
-            top: 30px; right: 30px;
-            width: 150px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid var(--neon-pink);
-            border-radius: 12px;
-            padding: 15px 20px;
-            backdrop-filter: blur(8px);
-            box-shadow: 0 0 15px rgba(255, 0, 234, 0.3);
+        .guide-box {
+            bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 20px;
         }
 
-        .energy-title {
+        .guide-item {
+            text-align: center;
             font-size: 14px;
-            letter-spacing: 2px;
-            color: var(--neon-pink);
-            text-align: right;
-            margin-bottom: 10px;
+            opacity: 0.7;
         }
 
-        .energy-bar-bg {
-            width: 100%;
-            height: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 5px;
-            overflow: hidden;
+        .guide-icon {
+            font-size: 30px;
+            margin-bottom: 5px;
         }
 
-        .energy-bar-fill {
-            width: 0%;
-            height: 100%;
-            background: var(--neon-pink);
-            box-shadow: 0 0 10px var(--neon-pink);
-            transition: width 0.2s ease-out, background 0.2s;
-            border-radius: 5px;
-        }
-
-        .scanner-line {
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
-            box-shadow: 0 0 15px var(--neon-blue);
-            z-index: 5;
-            animation: scan 3s infinite linear;
-        }
-
-        @keyframes scan {
-            0% { top: 0%; opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { top: 100%; opacity: 0; }
-        }
-
-        .loading-overlay {
+        .flash-overlay {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: #000;
-            z-index: 100;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
+            background: white;
+            opacity: 0;
+            z-index: 15;
+            pointer-events: none;
+            transition: opacity 0.1s;
+        }
+
+        .loading-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 100;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
             transition: opacity 0.5s;
         }
-        .loading-overlay.hidden { opacity: 0; pointer-events: none; }
-        .loading-spinner {
-            width: 50px; height: 50px;
-            border: 4px solid rgba(255,255,255,0.1);
-            border-top-color: var(--neon-blue);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
+        .loading-screen.hidden { opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body>
-    <div class="video-container">
-        <div id="loadingScreen" class="loading-overlay">
-            <div class="loading-spinner"></div>
-            <h2>Menginisialisasi Sistem</h2>
-            <p style="color: var(--neon-blue); margin-top:10px;">Mengunduh Model AI...</p>
+    <div class="container">
+        <div id="loadingScreen" class="loading-screen">
+            <h2>Memuat Model...</h2>
+            <p style="color: #00f3ff; margin-top: 10px;">Memindai deteksi tangan...</p>
         </div>
 
-        <div class="scanner-line"></div>
+        <div id="flashOverlay" class="flash-overlay"></div>
         <video id="videoElement" autoplay playsinline></video>
-        <canvas id="canvasElement"></canvas>
 
         <div class="hud status-box">
-            <div class="status-title">Status Deteksi</div>
-            <div id="statusState" class="status-state" style="color: #aaa;">STANDBY</div>
+            <div style="font-size: 12px; letter-spacing: 2px; color: #aaa; margin-bottom: 5px;">GESTURE</div>
+            <div id="gestureText" class="gesture-text" style="color: #aaa;">MENUNGGU...</div>
         </div>
 
-        <div class="hud energy-box">
-            <div class="energy-title">ENERGI</div>
-            <div class="energy-bar-bg">
-                <div id="energyFill" class="energy-bar-fill"></div>
-            </div>
+        <div class="hud guide-box">
+            <div class="guide-item"><div class="guide-icon">✊</div>Genggam</div>
+            <div class="guide-item"><div class="guide-icon">✋</div>Buka</div>
+            <div class="guide-item"><div class="guide-icon">👍</div>Jempol</div>
+            <div class="guide-item"><div class="guide-icon">☝️</div>Telunjuk</div>
         </div>
     </div>
 
     <script>
         const videoElement = document.getElementById('videoElement');
-        const canvasElement = document.getElementById('canvasElement');
-        const ctx = canvasElement.getContext('2d');
-        const statusState = document.getElementById('statusState');
-        const energyFill = document.getElementById('energyFill');
+        const gestureText = document.getElementById('gestureText');
+        const flashOverlay = document.getElementById('flashOverlay');
         const loadingScreen = document.getElementById('loadingScreen');
 
-        let particles = [];
-        let globalEnergy = 0;
+        // ==========================================
+        // PENGATURAN SUARA (GANTI DENGAN FILE ANDA)
+        // ==========================================
+        const SOUNDS = {
+            FIST: 'https://a.top4top.io/m_3788mwmf21.mp3',     // Ganti dengan link/file suara untuk ✊
+            OPEN: 'https://f.top4top.io/m_3788aawko1.mp3',        // Ganti dengan link/file suara untuk ✋
+            THUMBS_UP: 'https://c.top4top.io/m_3788rr3tm1.mp3', // Ganti dengan link/file suara untuk 👍
+            POINT_UP: 'https://f.top4top.io/m_3788okwmq1.mp3' // Ganti dengan link/file suara untuk ☝️
+        };
 
-        class Particle {
-            constructor(x, y, color, isGrab) {
-                this.x = x;
-                this.y = y;
-                this.size = Math.random() * 4 + 1;
-                this.color = color;
-                // Kalau menggenggam, partikel awalnya lebih cepat/keras
-                this.vx = (Math.random() - 0.5) * (isGrab ? 6 : 2);
-                this.vy = (Math.random() - 0.5) * (isGrab ? 6 : 2);
-                this.life = 1;
-                this.isGrab = isGrab;
-            }
-
-            update(isGrabbing, centerX, centerY) {
-                if (isGrabbing) {
-                    let dx = centerX - this.x;
-                    let dy = centerY - this.y;
-                    let dist = Math.hypot(dx, dy);
-                    this.vx += (dx / dist) * 1.2;
-                    this.vy += (dy / dist) * 1.2;
-                    this.life -= 0.035;
-                } else {
-                    this.vx *= 0.96;
-                    this.vy *= 0.96;
-                    this.vy -= 0.03; 
-                    this.life -= 0.015;
+        // Audio Pool System (Anti pecah suara saat di-spam tanpa cooldown)
+        class SoundPool {
+            constructor(src, poolSize = 5) {
+                this.pool = [];
+                this.index = 0;
+                for (let i = 0; i < poolSize; i++) {
+                    const audio = new Audio(src);
+                    audio.preload = 'auto';
+                    this.pool.push(audio);
                 }
-                this.x += this.vx;
-                this.y += this.vy;
             }
 
-            draw(ctx) {
-                ctx.globalAlpha = this.life;
-                ctx.fillStyle = this.color;
-                ctx.shadowBlur = 20;
-                ctx.shadowColor = this.color;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.globalAlpha = 1;
+            play() {
+                // Ambil audio selanjutnya secara berurutan biar nggak tumpang tindih di object yang sama
+                const audio = this.pool[this.index];
+                audio.currentTime = 0; // Rewind
+                audio.play().catch(e => console.log("Menunggu interaksi user..."));
+                this.index = (this.index + 1) % this.pool.length;
             }
         }
 
+        // Inisialisasi Pool Suara
+        const soundFist = new SoundPool(SOUNDS.FIST);
+        const soundOpen = new SoundPool(SOUNDS.OPEN);
+        const soundThumbsUp = new SoundPool(SOUNDS.THUMBS_UP);
+        const soundPointUp = new SoundPool(SOUNDS.POINT_UP);
+
+        let lastGesture = "NONE";
+        let frameCount = 0;
+
+        // Inisialisasi MediaPipe Hands
         const hands = new Hands({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
 
         hands.setOptions({
-            maxNumHands: 2, // Bisa 2 tangan sekarang!
+            maxNumHands: 1,
             modelComplexity: 1,
-            minDetectionConfidence: 0.7,
-            minTrackingConfidence: 0.5
+            minDetectionConfidence: 0.8,
+            minTrackingConfidence: 0.6
         });
 
         hands.onResults(onResults);
 
         function onResults(results) {
-            if (loadingScreen.classList.contains('hidden') === false) {
+            if (!loadingScreen.classList.contains('hidden')) {
                 loadingScreen.classList.add('hidden');
             }
 
-            canvasElement.width = videoElement.videoWidth;
-            canvasElement.height = videoElement.videoHeight;
-            ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-            let isAnyHandGrabbing = false;
+            frameCount++;
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                for (const landmarks of results.multiHandLandmarks) {
-                    const indexTip = landmarks[8];
-                    const thumbBase = landmarks[2];
-                    const distance = Math.hypot(indexTip.x - thumbBase.x, indexTip.y - thumbBase.y);
-                    const isGrabbing = distance < 0.1;
-
-                    if (isGrabbing) isAnyHandGrabbing = true;
-
-                    const palmCenter = landmarks[9];
-                    const centerX = palmCenter.x * canvasElement.width;
-                    const centerY = palmCenter.y * canvasElement.height;
-
-                    const fingerTips = [4, 8, 12, 16, 20];
-
-                    fingerTips.forEach(idx => {
-                        const tip = landmarks[idx];
-                        const x = tip.x * canvasElement.width;
-                        const y = tip.y * canvasElement.height;
-                        
-                        let color = isGrabbing 
-                            ? `hsl(${Math.random() * 30 + 10}, 100%, 60%)` // Oranye/Merah
-                            : `hsl(${Math.random() * 60 + 160}, 100%, 70%)`; // Cyan/Biru/Hijau
-                        
-                        if (particles.length < 500) {
-                            particles.push(new Particle(x, y, color, isGrabbing));
-                        }
-                    });
-
-                    // Gambar kerangka tangan (Cyberpunk style)
-                    drawCyberSkeleton(landmarks, isGrabbing);
-
-                    // Gambar aura energi
-                    if (isGrabbing) {
-                        drawEnergyCore(centerX, centerY, 60, 'rgba(255, 60, 0, 0.8)', 'rgba(255, 0, 0, 0)');
-                    } else {
-                        drawEnergyCore(centerX, centerY, 80, 'rgba(0, 243, 255, 0.2)', 'rgba(0, 243, 255, 0)');
-                    }
-                }
+                const landmarks = results.multiHandLandmarks[0];
+                const gesture = detectGesture(landmarks);
 
                 // Update UI Text
-                if (isAnyHandGrabbing) {
-                    statusState.innerText = "POWER GRAB!";
-                    statusState.style.color = "var(--neon-orange)";
-                    globalEnergy = Math.min(100, globalEnergy + 5);
-                } else {
-                    statusState.innerText = "TRACKING ACTIVE";
-                    statusState.style.color = "var(--neon-green)";
-                    globalEnergy = Math.max(0, globalEnergy - 1);
+                if (gesture !== lastGesture) {
+                    updateUI(gesture);
+                    lastGesture = gesture;
+                }
+
+                // TANPA COOLDOWN: Mainkan suara setiap beberapa frame (sekitar 10x per detik)
+                // Kalau mau super cepat (60x per detik), hapus kondisi (frameCount % 6 === 0)
+                if (frameCount % 6 === 0) { 
+                    triggerSound(gesture);
                 }
 
             } else {
-                statusState.innerText = "NO TARGET";
-                statusState.style.color = "#aaa";
-                globalEnergy = Math.max(0, globalEnergy - 2);
-            }
-
-            // Update Energy Bar UI
-            energyFill.style.width = globalEnergy + '%';
-            if (globalEnergy > 60) {
-                energyFill.style.background = 'var(--neon-orange)';
-                energyFill.style.boxShadow = '0 0 15px var(--neon-orange)';
-            } else {
-                energyFill.style.background = 'var(--neon-pink)';
-                energyFill.style.boxShadow = '0 0 10px var(--neon-pink)';
-            }
-
-            // Render Partikel
-            for (let i = particles.length - 1; i >= 0; i--) {
-                let p = particles[i];
-                let centerXScaled = 0, centerYScaled = 0;
-                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                    const palmCenter = results.multiHandLandmarks[0][9];
-                    centerXScaled = palmCenter.x * canvasElement.width;
-                    centerYScaled = palmCenter.y * canvasElement.height;
+                if (lastGesture !== "NONE") {
+                    gestureText.innerText = "MENUNGGU...";
+                    gestureText.style.color = "#aaa";
+                    lastGesture = "NONE";
                 }
-                p.update(isAnyHandGrabbing, centerXScaled, centerYScaled);
-                p.draw(ctx);
-                if (p.life <= 0) particles.splice(i, 1);
             }
         }
 
-        function drawEnergyCore(x, y, radius, colorInner, colorOuter) {
-            const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-            gradient.addColorStop(0, colorInner);
-            gradient.addColorStop(1, colorOuter);
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.fill();
+        function triggerSound(gesture) {
+            switch(gesture) {
+                case "FIST": soundFist.play(); break;
+                case "OPEN": soundOpen.play(); break;
+                case "THUMBS_UP": soundThumbsUp.play(); break;
+                case "POINT_UP": soundPointUp.play(); break;
+            }
         }
 
-        function drawCyberSkeleton(landmarks, isGrabbing) {
-            const color = isGrabbing ? 'var(--neon-orange)' : 'var(--neon-blue)';
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = color;
+        function updateUI(gesture) {
+            // Flash effect layar saat berganti gestur
+            flashOverlay.style.opacity = '0.3';
+            setTimeout(() => flashOverlay.style.opacity = '0', 100);
 
-            // Koneksi jari ke telapak
-            const connections = [
-                [0,1],[1,2],[2,3],[3,4], // Ibu jari
-                [0,5],[5,6],[6,7],[7,8], // Telunjuk
-                [0,9],[9,10],[10,11],[11,12], // Tengah
-                [0,13],[13,14],[14,15],[15,16], // Manis
-                [0,17],[17,18],[18,19],[19,20], // Kelingking
-                [5,9],[9,13],[13,17] // Telapak bagian depan
-            ];
-
-            ctx.beginPath();
-            for (const [i, j] of connections) {
-                const p1 = landmarks[i];
-                const p2 = landmarks[j];
-                ctx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
-                ctx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+            switch(gesture) {
+                case "FIST":
+                    gestureText.innerText = "✊ GENGGAM";
+                    gestureText.style.color = "#ff4444";
+                    break;
+                case "OPEN":
+                    gestureText.innerText = "✋ TERBUKA";
+                    gestureText.style.color = "#44ff44";
+                    break;
+                case "THUMBS_UP":
+                    gestureText.innerText = "👍 JEMPOL";
+                    gestureText.style.color = "#ffaa00";
+                    break;
+                case "POINT_UP":
+                    gestureText.innerText = "☝️ TELUNJUK";
+                    gestureText.style.color = "#44aaff";
+                    break;
             }
-            ctx.stroke();
-
-            // Gambar titik-titik (nodes)
-            ctx.fillStyle = '#fff';
-            for (const lm of landmarks) {
-                ctx.beginPath();
-                ctx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, 3, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
-            ctx.shadowBlur = 0;
         }
 
-        // Camera Init
+        // Logika Deteksi Gestur Jari
+        function detectGesture(lm) {
+            // Cek apakah jari terbuka (y posisi ujung jari < y posisi buku jari tengah)
+            // Kecuali ibu jari (cek sumbu X tergantung tangan kiri/kanan, disederhanakan)
+            const isIndexOpen = lm[8].y < lm[6].y;
+            const isMiddleOpen = lm[12].y < lm[10].y;
+            const isRingOpen = lm[16].y < lm[14].y;
+            const isPinkyOpen = lm[20].y < lm[18].y;
+            
+            const isThumbOpen = Math.abs(lm[4].x - lm[3].x) > 0.05; // Jarak ibu jari ke telapak
+
+            const fingersOpenCount = [isIndexOpen, isMiddleOpen, isRingOpen, isPinkyOpen].filter(Boolean).length;
+
+            // ☝️ TELUNJUK: Hanya telunjuk yang terbuka
+            if (isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) {
+                return "POINT_UP";
+            }
+
+            // 👍 JEMPOL: Hanya ibu jari yang terbuka, yang lain menggenggam
+            if (isThumbOpen && fingersOpenCount === 0) {
+                return "THUMBS_UP";
+            }
+
+            // ✋ TERBUKA: Semua jari terbuka
+            if (fingersOpenCount >= 3 && isThumbOpen) {
+                return "OPEN";
+            }
+
+            // ✊ GENGGAM: Semua jari tertutup
+            if (fingersOpenCount === 0 && !isThumbOpen) {
+                return "FIST";
+            }
+
+            return "NONE";
+        }
+
+        // Start Camera
         const camera = new Camera(videoElement, {
             onFrame: async () => {
                 await hands.send({image: videoElement});
@@ -401,10 +270,7 @@
         
         camera.start().catch(err => {
             console.error(err);
-            loadingScreen.innerHTML = `
-                <h2 style="color: var(--neon-pink);">ERROR KAMERA</h2>
-                <p style="margin-top:10px; max-width:80%; text-align:center;">Izin kamera ditolak atau tidak terdeteksi. Buka di browser Chrome dan Allow akses kamera.</p>
-            `;
+            loadingScreen.innerHTML = `<h2 style="color:red;">Gagal Akses Kamera</h2><p>Izinkan kamera di browser Anda.</p>`;
         });
 
     </script>
