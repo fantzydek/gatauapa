@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyber Hand Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <style>
+        :root {
+            --neon-blue: #00f3ff;
+            --neon-pink: #ff00ea;
+            --neon-green: #39ff14;
+            --neon-orange: #ff6600;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #videoElement {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            filter: brightness(0.6) contrast(1.2); /* Sedikit gelapin video biar efek partikel menonjol */
+        }
+
+        #canvasElement {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            transform: scaleX(-1);
+            z-index: 10;
+        }
+
+        /* HUD / UI Overlays */
+        .hud {
+            position: absolute;
+            z-index: 20;
+            pointer-events: none;
+        }
+
+        /* Status Kiri Atas */
+        .status-box {
+            top: 30px; left: 30px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--neon-blue);
+            border-radius: 12px;
+            padding: 15px 25px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
+        }
+
+        .status-title {
+            font-size: 14px;
+            letter-spacing: 2px;
+            color: var(--neon-blue);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+
+        .status-state {
+            font-size: 28px;
+            font-weight: bold;
+            text-shadow: 0 0 10px currentColor;
+            transition: color 0.3s, text-shadow 0.3s;
+        }
+
+        /* Energy Bar Kanan Atas */
+        .energy-box {
+            top: 30px; right: 30px;
+            width: 150px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--neon-pink);
+            border-radius: 12px;
+            padding: 15px 20px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 0 15px rgba(255, 0, 234, 0.3);
+        }
+
+        .energy-title {
+            font-size: 14px;
+            letter-spacing: 2px;
+            color: var(--neon-pink);
+            text-align: right;
+            margin-bottom: 10px;
+        }
+
+        .energy-bar-bg {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .energy-bar-fill {
+            width: 0%;
+            height: 100%;
+            background: var(--neon-pink);
+            box-shadow: 0 0 10px var(--neon-pink);
+            transition: width 0.2s ease-out, background 0.2s;
+            border-radius: 5px;
+        }
+
+        .scanner-line {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+            box-shadow: 0 0 15px var(--neon-blue);
+            z-index: 5;
+            animation: scan 3s infinite linear;
+        }
+
+        @keyframes scan {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s;
+        }
+        .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+        .loading-spinner {
+            width: 50px; height: 50px;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-top-color: var(--neon-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+    </style>
+</head>
+<body>
+    <div class="video-container">
+        <div id="loadingScreen" class="loading-overlay">
+            <div class="loading-spinner"></div>
+            <h2>Menginisialisasi Sistem</h2>
+            <p style="color: var(--neon-blue); margin-top:10px;">Mengunduh Model AI...</p>
+        </div>
+
+        <div class="scanner-line"></div>
+        <video id="videoElement" autoplay playsinline></video>
+        <canvas id="canvasElement"></canvas>
+
+        <div class="hud status-box">
+            <div class="status-title">Status Deteksi</div>
+            <div id="statusState" class="status-state" style="color: #aaa;">STANDBY</div>
+        </div>
+
+        <div class="hud energy-box">
+            <div class="energy-title">ENERGI</div>
+            <div class="energy-bar-bg">
+                <div id="energyFill" class="energy-bar-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('videoElement');
+        const canvasElement = document.getElementById('canvasElement');
+        const ctx = canvasElement.getContext('2d');
+        const statusState = document.getElementById('statusState');
+        const energyFill = document.getElementById('energyFill');
+        const loadingScreen = document.getElementById('loadingScreen');
+
+        let particles = [];
+        let globalEnergy = 0;
+
+        class Particle {
+            constructor(x, y, color, isGrab) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 4 + 1;
+                this.color = color;
+                // Kalau menggenggam, partikel awalnya lebih cepat/keras
+                this.vx = (Math.random() - 0.5) * (isGrab ? 6 : 2);
+                this.vy = (Math.random() - 0.5) * (isGrab ? 6 : 2);
+                this.life = 1;
+                this.isGrab = isGrab;
+            }
+
+            update(isGrabbing, centerX, centerY) {
+                if (isGrabbing) {
+                    let dx = centerX - this.x;
+                    let dy = centerY - this.y;
+                    let dist = Math.hypot(dx, dy);
+                    this.vx += (dx / dist) * 1.2;
+                    this.vy += (dy / dist) * 1.2;
+                    this.life -= 0.035;
+                } else {
+                    this.vx *= 0.96;
+                    this.vy *= 0.96;
+                    this.vy -= 0.03; 
+                    this.life -= 0.015;
+                }
+                this.x += this.vx;
+                this.y += this.vy;
+            }
+
+            draw(ctx) {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 2, // Bisa 2 tangan sekarang!
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onResults);
+
+        function onResults(results) {
+            if (loadingScreen.classList.contains('hidden') === false) {
+                loadingScreen.classList.add('hidden');
+            }
+
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+            ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            let isAnyHandGrabbing = false;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    const indexTip = landmarks[8];
+                    const thumbBase = landmarks[2];
+                    const distance = Math.hypot(indexTip.x - thumbBase.x, indexTip.y - thumbBase.y);
+                    const isGrabbing = distance < 0.1;
+
+                    if (isGrabbing) isAnyHandGrabbing = true;
+
+                    const palmCenter = landmarks[9];
+                    const centerX = palmCenter.x * canvasElement.width;
+                    const centerY = palmCenter.y * canvasElement.height;
+
+                    const fingerTips = [4, 8, 12, 16, 20];
+
+                    fingerTips.forEach(idx => {
+                        const tip = landmarks[idx];
+                        const x = tip.x * canvasElement.width;
+                        const y = tip.y * canvasElement.height;
+                        
+                        let color = isGrabbing 
+                            ? `hsl(${Math.random() * 30 + 10}, 100%, 60%)` // Oranye/Merah
+                            : `hsl(${Math.random() * 60 + 160}, 100%, 70%)`; // Cyan/Biru/Hijau
+                        
+                        if (particles.length < 500) {
+                            particles.push(new Particle(x, y, color, isGrabbing));
+                        }
+                    });
+
+                    // Gambar kerangka tangan (Cyberpunk style)
+                    drawCyberSkeleton(landmarks, isGrabbing);
+
+                    // Gambar aura energi
+                    if (isGrabbing) {
+                        drawEnergyCore(centerX, centerY, 60, 'rgba(255, 60, 0, 0.8)', 'rgba(255, 0, 0, 0)');
+                    } else {
+                        drawEnergyCore(centerX, centerY, 80, 'rgba(0, 243, 255, 0.2)', 'rgba(0, 243, 255, 0)');
+                    }
+                }
+
+                // Update UI Text
+                if (isAnyHandGrabbing) {
+                    statusState.innerText = "POWER GRAB!";
+                    statusState.style.color = "var(--neon-orange)";
+                    globalEnergy = Math.min(100, globalEnergy + 5);
+                } else {
+                    statusState.innerText = "TRACKING ACTIVE";
+                    statusState.style.color = "var(--neon-green)";
+                    globalEnergy = Math.max(0, globalEnergy - 1);
+                }
+
+            } else {
+                statusState.innerText = "NO TARGET";
+                statusState.style.color = "#aaa";
+                globalEnergy = Math.max(0, globalEnergy - 2);
+            }
+
+            // Update Energy Bar UI
+            energyFill.style.width = globalEnergy + '%';
+            if (globalEnergy > 60) {
+                energyFill.style.background = 'var(--neon-orange)';
+                energyFill.style.boxShadow = '0 0 15px var(--neon-orange)';
+            } else {
+                energyFill.style.background = 'var(--neon-pink)';
+                energyFill.style.boxShadow = '0 0 10px var(--neon-pink)';
+            }
+
+            // Render Partikel
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                let centerXScaled = 0, centerYScaled = 0;
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const palmCenter = results.multiHandLandmarks[0][9];
+                    centerXScaled = palmCenter.x * canvasElement.width;
+                    centerYScaled = palmCenter.y * canvasElement.height;
+                }
+                p.update(isAnyHandGrabbing, centerXScaled, centerYScaled);
+                p.draw(ctx);
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function drawEnergyCore(x, y, radius, colorInner, colorOuter) {
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+            gradient.addColorStop(0, colorInner);
+            gradient.addColorStop(1, colorOuter);
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawCyberSkeleton(landmarks, isGrabbing) {
+            const color = isGrabbing ? 'var(--neon-orange)' : 'var(--neon-blue)';
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = color;
+
+            // Koneksi jari ke telapak
+            const connections = [
+                [0,1],[1,2],[2,3],[3,4], // Ibu jari
+                [0,5],[5,6],[6,7],[7,8], // Telunjuk
+                [0,9],[9,10],[10,11],[11,12], // Tengah
+                [0,13],[13,14],[14,15],[15,16], // Manis
+                [0,17],[17,18],[18,19],[19,20], // Kelingking
+                [5,9],[9,13],[13,17] // Telapak bagian depan
+            ];
+
+            ctx.beginPath();
+            for (const [i, j] of connections) {
+                const p1 = landmarks[i];
+                const p2 = landmarks[j];
+                ctx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
+                ctx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+            }
+            ctx.stroke();
+
+            // Gambar titik-titik (nodes)
+            ctx.fillStyle = '#fff';
+            for (const lm of landmarks) {
+                ctx.beginPath();
+                ctx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.shadowBlur = 0;
+        }
+
+        // Camera Init
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+        
+        camera.start().catch(err => {
+            console.error(err);
+            loadingScreen.innerHTML = `
+                <h2 style="color: var(--neon-pink);">ERROR KAMERA</h2>
+                <p style="margin-top:10px; max-width:80%; text-align:center;">Izin kamera ditolak atau tidak terdeteksi. Buka di browser Chrome dan Allow akses kamera.</p>
+            `;
+        });
+
+    </script>
+</body>
+</html>
